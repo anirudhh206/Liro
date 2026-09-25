@@ -29,25 +29,19 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(borrowRoutes);
   await app.register(payoutRoutes);
 
-  app.get("/health", async () => ({ status: "ok" }));
+  app.get("/health", () => ({ status: "ok" }));
 
   // Central mapping from internal error types to HTTP responses — keeps
   // route handlers free of try/catch boilerplate for these known cases.
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {
-      return reply
-        .code(400)
-        .send({ error: "invalid_request", issues: error.issues });
+      return reply.code(400).send({ error: "invalid_request", issues: error.issues });
     }
     if (error instanceof OracleDivergenceError) {
-      return reply
-        .code(503)
-        .send({ error: "oracle_divergence", message: error.message });
+      return reply.code(503).send({ error: "oracle_divergence", message: error.message });
     }
     if (error instanceof WalletPolicyViolationError) {
-      return reply
-        .code(403)
-        .send({ error: "wallet_policy_violation", message: error.message });
+      return reply.code(403).send({ error: "wallet_policy_violation", message: error.message });
     }
     if (error instanceof PayoutProviderNotConfiguredError) {
       return reply.code(503).send({

@@ -14,9 +14,7 @@ const onboardBodySchema = z.object({
  * identity everything else authenticates against (ADR-7). Every other
  * mutating route requires the session token this issues.
  */
-export default async function onboardRoutes(
-  fastify: FastifyInstance,
-): Promise<void> {
+export default function onboardRoutes(fastify: FastifyInstance): void {
   fastify.post("/onboard", async (request, reply) => {
     const body = onboardBodySchema.parse(request.body);
     const ipAddress = request.ip;
@@ -46,9 +44,7 @@ export default async function onboardRoutes(
     });
 
     if (eligibility.decision === "rejected") {
-      return reply
-        .code(403)
-        .send({ error: "not_eligible", reason: eligibility.reason });
+      return reply.code(403).send({ error: "not_eligible", reason: eligibility.reason });
     }
 
     // 3. Issue the session token (ADR-7) — the only source of userId from here on.

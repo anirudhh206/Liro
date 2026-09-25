@@ -34,10 +34,7 @@ export async function evaluateEligibility(params: {
   if (!ELIGIBLE_COUNTRIES.has(params.declaredCountry)) {
     decision = "rejected";
     reason = `Declared country ${params.declaredCountry} is not in an eligible payout corridor`;
-  } else if (
-    ipGeolocatedCountry &&
-    ipGeolocatedCountry !== params.declaredCountry
-  ) {
+  } else if (ipGeolocatedCountry && ipGeolocatedCountry !== params.declaredCountry) {
     decision = "rejected";
     reason = `Declared country ${params.declaredCountry} does not match IP-geolocated country ${ipGeolocatedCountry}`;
   } else {

@@ -30,9 +30,7 @@ const ALLOWED_ACTIONS: readonly WalletPolicyAction[] = [
 
 export class WalletPolicyViolationError extends Error {
   constructor(action: string) {
-    super(
-      `Action "${action}" is not in the allow-listed policy set — refusing to sign`,
-    );
+    super(`Action "${action}" is not in the allow-listed policy set — refusing to sign`);
     this.name = "WalletPolicyViolationError";
   }
 }
@@ -49,9 +47,7 @@ export class WalletPolicyViolationError extends Error {
  * enforces the same allow-list as a second, application-layer gate.
  */
 export const turnkeyWalletProvider: WalletProvider = {
-  async createEmbeddedWallet(params: {
-    userId: string;
-  }): Promise<{ walletAddress: string; turnkeySubOrgId: string }> {
+  async createEmbeddedWallet(params: { userId: string }): Promise<{ walletAddress: string; turnkeySubOrgId: string }> {
     const response = await apiClient.createSubOrganization({
       subOrganizationName: `liro-${params.userId}`,
       rootQuorumThreshold: 1,
@@ -106,9 +102,7 @@ export const turnkeyWalletProvider: WalletProvider = {
       where: { id: params.userId },
     });
     if (!user.turnkeySubOrgId) {
-      throw new Error(
-        `User ${params.userId} has no Turnkey sub-organization on record — onboarding incomplete`,
-      );
+      throw new Error(`User ${params.userId} has no Turnkey sub-organization on record — onboarding incomplete`);
     }
 
     // Turnkey's own policy engine re-checks this signing request against the

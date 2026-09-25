@@ -10,11 +10,7 @@ export interface ReserveHealth {
 export interface LendingProvider {
   getReserveHealth(asset: AssetSymbol): Promise<ReserveHealth>;
   /** Deposits `asset` (priced via ADR-8's sanity-checked oracle) as Kamino collateral. */
-  deposit(params: {
-    userId: string;
-    asset: AssetSymbol;
-    amountUsd: string;
-  }): Promise<{ txSignature: string }>;
+  deposit(params: { userId: string; asset: AssetSymbol; amountUsd: string }): Promise<{ txSignature: string }>;
   /**
    * Borrows against whatever collateral the user's on-chain obligation
    * already holds, denominated in BORROW_ASSET_SYMBOL (USDC). Which asset
@@ -23,22 +19,14 @@ export interface LendingProvider {
    * debt reserve. Collateral health is checked by the caller beforehand
    * (see routes/borrow.route.ts) via getReserveHealth on that asset.
    */
-  borrow(params: {
-    userId: string;
-    amountUsd: string;
-  }): Promise<{ txSignature: string; borrowedUsd: string }>;
+  borrow(params: { userId: string; amountUsd: string }): Promise<{ txSignature: string; borrowedUsd: string }>;
 }
 
 /** ADR-1: only a pre-declared, allow-listed action set may ever be signed on the user's behalf. */
-export type WalletPolicyAction =
-  | "swap_usdc_for_basket"
-  | "deposit_kamino_collateral"
-  | "borrow_against_collateral";
+export type WalletPolicyAction = "swap_usdc_for_basket" | "deposit_kamino_collateral" | "borrow_against_collateral";
 
 export interface WalletProvider {
-  createEmbeddedWallet(params: {
-    userId: string;
-  }): Promise<{ walletAddress: string; turnkeySubOrgId: string }>;
+  createEmbeddedWallet(params: { userId: string }): Promise<{ walletAddress: string; turnkeySubOrgId: string }>;
   /**
    * Signs a fully-built, unsigned transaction (hex-encoded wire bytes, as
    * produced by `getTransactionEncoder().encode()` in @solana/kit) through
@@ -64,10 +52,7 @@ export interface PayoutQuote {
 }
 
 export interface PayoutProvider {
-  getQuote(params: {
-    amountUsd: string;
-    localCurrency: "BRL" | "INR";
-  }): Promise<PayoutQuote>;
+  getQuote(params: { amountUsd: string; localCurrency: "BRL" | "INR" }): Promise<PayoutQuote>;
   executePayout(params: {
     userId: string;
     quoteId: string;
@@ -85,16 +70,11 @@ export type KycStatus = "pending" | "approved" | "declined" | "requires_input";
 
 export interface KycProvider {
   /** Starts a verification session/inquiry for a user; the client completes it via `verificationUrl`. */
-  startVerification(params: {
-    userId: string;
-    declaredCountry: string;
-  }): Promise<{
+  startVerification(params: { userId: string; declaredCountry: string }): Promise<{
     inquiryId: string;
     verificationUrl: string;
     status: KycStatus;
   }>;
   /** Polls the current status — also called from the provider's webhook handler to reconcile async updates. */
-  getVerificationStatus(params: {
-    inquiryId: string;
-  }): Promise<{ status: KycStatus }>;
+  getVerificationStatus(params: { inquiryId: string }): Promise<{ status: KycStatus }>;
 }

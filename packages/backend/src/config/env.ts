@@ -7,13 +7,9 @@ import { z } from "zod";
  */
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
-  NODE_ENV: z
-    .enum(["development", "test", "production"])
-    .default("development"),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
-  SESSION_JWT_SECRET: z
-    .string()
-    .min(32, "SESSION_JWT_SECRET must be at least 32 characters"),
+  SESSION_JWT_SECRET: z.string().min(32, "SESSION_JWT_SECRET must be at least 32 characters"),
 
   DATABASE_URL: z.string().url(),
 
@@ -39,9 +35,7 @@ export type Env = z.infer<typeof envSchema>;
 function loadEnv(): Env {
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
-      .join("\n");
+    const issues = parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
   return parsed.data;
@@ -50,6 +44,4 @@ function loadEnv(): Env {
 export const env = loadEnv();
 
 /** True once real Grid sandbox credentials exist (ADR-3 named blocker). */
-export const gridCredentialsConfigured = Boolean(
-  env.GRID_CLIENT_ID && env.GRID_CLIENT_SECRET,
-);
+export const gridCredentialsConfigured = Boolean(env.GRID_CLIENT_ID && env.GRID_CLIENT_SECRET);

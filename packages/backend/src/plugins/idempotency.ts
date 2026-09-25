@@ -13,10 +13,7 @@ const IDEMPOTENCY_HEADER = "idempotency-key";
  * Must run AFTER auth (needs request.userId) and BEFORE the route handler
  * does any real work.
  */
-async function idempotencyPreHandler(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
+async function idempotencyPreHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const key = request.headers[IDEMPOTENCY_HEADER];
   if (typeof key !== "string" || key.length === 0) {
     return reply.code(400).send({ error: "missing_idempotency_key" });
@@ -58,17 +55,14 @@ export async function storeIdempotentResponse(
       },
     });
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return; // another concurrent request already stored it — not an error
     }
     throw err;
   }
 }
 
-export default fp(async function idempotencyPlugin(fastify: FastifyInstance) {
+export default fp(function idempotencyPlugin(fastify: FastifyInstance) {
   fastify.decorate("idempotent", idempotencyPreHandler);
 });
 

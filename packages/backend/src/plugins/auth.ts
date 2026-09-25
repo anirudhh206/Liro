@@ -34,10 +34,7 @@ async function verifySessionToken(token: string): Promise<string> {
   return payload.sub;
 }
 
-async function authPreHandler(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
+async function authPreHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const header = request.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     return reply.code(401).send({ error: "missing_bearer_token" });
@@ -56,7 +53,7 @@ async function authPreHandler(
  * (`preHandler: [fastify.authenticate]`) rather than applying auth globally
  * and special-casing the onboarding route that issues the first token.
  */
-export default fp(async function authPlugin(fastify: FastifyInstance) {
+export default fp(function authPlugin(fastify: FastifyInstance) {
   fastify.decorate("authenticate", authPreHandler);
 });
 

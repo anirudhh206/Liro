@@ -49,9 +49,7 @@ export async function buildSwapTransaction(params: {
     }),
   });
   if (!res.ok) {
-    throw new Error(
-      `Jupiter swap build failed: ${res.status} ${await res.text()}`,
-    );
+    throw new Error(`Jupiter swap build failed: ${res.status} ${await res.text()}`);
   }
   return (await res.json()) as { swapTransaction: string };
 }

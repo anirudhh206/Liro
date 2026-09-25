@@ -30,10 +30,7 @@ function requireClient(): LightsparkGrid {
 }
 
 export const lightsparkGridPayoutProvider: PayoutProvider = {
-  async getQuote(params: {
-    amountUsd: string;
-    localCurrency: "BRL" | "INR";
-  }): Promise<PayoutQuote> {
+  getQuote(params: { amountUsd: string; localCurrency: "BRL" | "INR" }): Promise<PayoutQuote> {
     const grid = requireClient();
     void grid; // real call: grid.quotes.create({...}) once account IDs for the
     // internal (Liro-held) and external (user payout destination) accounts
@@ -45,7 +42,7 @@ export const lightsparkGridPayoutProvider: PayoutProvider = {
     );
   },
 
-  async executePayout(params: {
+  executePayout(params: {
     userId: string;
     quoteId: string;
     destination: Record<string, unknown>;

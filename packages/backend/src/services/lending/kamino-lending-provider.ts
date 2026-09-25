@@ -8,13 +8,7 @@ import {
   ReserveStatus,
   getCurrentLedgerInstant,
 } from "@kamino-finance/klend-sdk";
-import {
-  BORROW_ASSET_SYMBOL,
-  type AssetSymbol,
-  type LendingProvider,
-  type ReserveHealth,
-} from "@liro/shared";
-import { env } from "../../config/env.js";
+import { BORROW_ASSET_SYMBOL, type AssetSymbol, type LendingProvider, type ReserveHealth } from "@liro/shared";
 import { prisma } from "../../db/client.js";
 import { rpc, buildUnsignedTransactionHex } from "../wallet/solana-tx.util.js";
 import { turnkeyWalletProvider } from "../wallet/turnkey-wallet-provider.js";
@@ -24,9 +18,7 @@ import { getSanityCheckedPrice } from "../pricing/pricing.service.js";
  * Kamino's main lending market address (mainnet-beta), per Kamino's own
  * deployed-addresses docs. Not a secret — public program state.
  */
-const KAMINO_MAIN_MARKET: Address = address(
-  "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
-);
+const KAMINO_MAIN_MARKET: Address = address("7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF");
 
 let cachedMarket: KaminoMarket | null = null;
 
@@ -38,19 +30,12 @@ async function loadMarket(): Promise<KaminoMarket> {
     // klend-sdk bundles its own @solana/kit@2.3.0 internally while its own
     // sub-dependencies (@solana-program/*) require @solana/kit@^3.0 — a real
     // version-skew bug in Kamino's own dependency tree (visible as a pnpm
-    // peer-dependency warning on install), which makes the Rpc client from
-    // our top-level @solana/kit@3.x structurally incompatible with what
-    // klend-sdk's types declare. The cast below bridges that mismatch; it
-    // does not paper over anything on our side.
-    const market = await KaminoMarket.load(
-      rpc as unknown as Parameters<typeof KaminoMarket.load>[0],
-      KAMINO_MAIN_MARKET,
-      DEFAULT_RECENT_SLOT_DURATION_MS,
-    );
+    // peer-dependency warning on install). It doesn't actually break type
+    // compatibility here — both @solana/kit majors' Rpc<KaminoMarketRpcApi>
+    // shapes structurally match — so no cast is needed for this call.
+    const market = await KaminoMarket.load(rpc, KAMINO_MAIN_MARKET, DEFAULT_RECENT_SLOT_DURATION_MS);
     if (!market) {
-      throw new Error(
-        "Kamino market failed to load — check SOLANA_RPC_URL and market address",
-      );
+      throw new Error("Kamino market failed to load — check SOLANA_RPC_URL and market address");
     }
     cachedMarket = market;
   }
@@ -71,24 +56,15 @@ function getReserveBySymbol(market: KaminoMarket, symbol: string) {
 }
 
 /** ADR-8: Kamino's own oracle reading (Chainlink-backed) for the same collateral Pyth prices. */
-export async function getKaminoOraclePrice(
-  asset: AssetSymbol,
-): Promise<number> {
+export async function getKaminoOraclePrice(asset: AssetSymbol): Promise<number> {
   const market = await loadMarket();
   const reserve = getReserveBySymbol(market, asset);
   return reserve.getOracleMarketPrice().toNumber();
 }
 
 /** Converts a USD amount into a reserve's base-unit token amount using decimal.js — never floats — for financial-grade precision. */
-function usdToBaseUnits(
-  amountUsd: string,
-  priceUsd: number,
-  decimals: number,
-): string {
-  return new Decimal(amountUsd)
-    .dividedBy(priceUsd)
-    .mul(new Decimal(10).pow(decimals))
-    .toFixed(0);
+function usdToBaseUnits(amountUsd: string, priceUsd: number, decimals: number): string {
+  return new Decimal(amountUsd).dividedBy(priceUsd).mul(new Decimal(10).pow(decimals)).toFixed(0);
 }
 
 async function loadUserSigner(userId: string) {
@@ -121,11 +97,7 @@ export const kaminoLendingProvider: LendingProvider = {
     };
   },
 
-  async deposit(params: {
-    userId: string;
-    asset: AssetSymbol;
-    amountUsd: string;
-  }): Promise<{ txSignature: string }> {
+  async deposit(params: { userId: string; asset: AssetSymbol; amountUsd: string }): Promise<{ txSignature: string }> {
     const market = await loadMarket();
     const reserve = getReserveBySymbol(market, params.asset);
     const { ownerAddress, owner } = await loadUserSigner(params.userId);
@@ -134,15 +106,9 @@ export const kaminoLendingProvider: LendingProvider = {
     // deposit amount computed off a single unchecked oracle is exactly the
     // failure mode ADR-8 exists to prevent.
     const { priceUsd } = await getSanityCheckedPrice(params.asset);
-    const amount = usdToBaseUnits(
-      params.amountUsd,
-      priceUsd,
-      reserve.stats.decimals,
-    );
+    const amount = usdToBaseUnits(params.amountUsd, priceUsd, reserve.stats.decimals);
 
-    const currentLedgerInstant = await getCurrentLedgerInstant(
-      rpc as unknown as Parameters<typeof getCurrentLedgerInstant>[0],
-    );
+    const currentLedgerInstant = await getCurrentLedgerInstant(rpc);
 
     const kaminoAction = await KaminoAction.buildDepositTxns({
       kaminoMarket: market,
@@ -156,11 +122,7 @@ export const kaminoLendingProvider: LendingProvider = {
     });
 
     const unsignedTransactionHex = await buildUnsignedTransactionHex({
-      instructions: [
-        ...kaminoAction.setupIxs,
-        ...kaminoAction.lendingIxs,
-        ...kaminoAction.cleanupIxs,
-      ],
+      instructions: [...kaminoAction.setupIxs, ...kaminoAction.lendingIxs, ...kaminoAction.cleanupIxs],
       feePayer: ownerAddress,
     });
 
@@ -173,10 +135,7 @@ export const kaminoLendingProvider: LendingProvider = {
     return { txSignature: signed.txSignature };
   },
 
-  async borrow(params: {
-    userId: string;
-    amountUsd: string;
-  }): Promise<{ txSignature: string; borrowedUsd: string }> {
+  async borrow(params: { userId: string; amountUsd: string }): Promise<{ txSignature: string; borrowedUsd: string }> {
     const market = await loadMarket();
     const reserve = getReserveBySymbol(market, BORROW_ASSET_SYMBOL);
     const { ownerAddress, owner } = await loadUserSigner(params.userId);
@@ -186,9 +145,7 @@ export const kaminoLendingProvider: LendingProvider = {
     // prices a volatile xStock).
     const amount = usdToBaseUnits(params.amountUsd, 1, reserve.stats.decimals);
 
-    const currentLedgerInstant = await getCurrentLedgerInstant(
-      rpc as unknown as Parameters<typeof getCurrentLedgerInstant>[0],
-    );
+    const currentLedgerInstant = await getCurrentLedgerInstant(rpc);
 
     const kaminoAction = await KaminoAction.buildBorrowTxns({
       kaminoMarket: market,
@@ -202,11 +159,7 @@ export const kaminoLendingProvider: LendingProvider = {
     });
 
     const unsignedTransactionHex = await buildUnsignedTransactionHex({
-      instructions: [
-        ...kaminoAction.setupIxs,
-        ...kaminoAction.lendingIxs,
-        ...kaminoAction.cleanupIxs,
-      ],
+      instructions: [...kaminoAction.setupIxs, ...kaminoAction.lendingIxs, ...kaminoAction.cleanupIxs],
       feePayer: ownerAddress,
     });
 

@@ -26,9 +26,7 @@ export class OracleDivergenceError extends Error {
     public readonly pythPrice: number,
     public readonly kaminoPrice: number,
   ) {
-    super(
-      `Price feeds disagree for ${asset}: Pyth=${pythPrice}, Kamino=${kaminoPrice}`,
-    );
+    super(`Price feeds disagree for ${asset}: Pyth=${pythPrice}, Kamino=${kaminoPrice}`);
     this.name = "OracleDivergenceError";
   }
 }
@@ -44,22 +42,26 @@ async function getPythPrice(asset: AssetSymbol): Promise<number> {
   return Number(price) * 10 ** expo;
 }
 
+/** Pure relative-divergence check — split out from getSanityCheckedPrice so it's unit-testable without network calls. */
+export function isWithinDivergenceTolerance(
+  priceA: number,
+  priceB: number,
+  tolerance = MAX_ORACLE_DIVERGENCE,
+): boolean {
+  if (priceA === priceB) return true;
+  const divergence = Math.abs(priceA - priceB) / Math.max(priceA, priceB);
+  return divergence <= tolerance;
+}
+
 /**
  * ADR-8: the only function callers should use to price a borrow decision.
  * Fetches Pyth's price and cross-checks it against Kamino's own oracle
  * reading (Chainlink) for the same collateral before trusting either.
  */
-export async function getSanityCheckedPrice(
-  asset: AssetSymbol,
-): Promise<{ priceUsd: number }> {
-  const [pythPrice, kaminoPrice] = await Promise.all([
-    getPythPrice(asset),
-    getKaminoOraclePrice(asset),
-  ]);
+export async function getSanityCheckedPrice(asset: AssetSymbol): Promise<{ priceUsd: number }> {
+  const [pythPrice, kaminoPrice] = await Promise.all([getPythPrice(asset), getKaminoOraclePrice(asset)]);
 
-  const divergence =
-    Math.abs(pythPrice - kaminoPrice) / Math.max(pythPrice, kaminoPrice);
-  if (divergence > MAX_ORACLE_DIVERGENCE) {
+  if (!isWithinDivergenceTolerance(pythPrice, kaminoPrice)) {
     throw new OracleDivergenceError(asset, pythPrice, kaminoPrice);
   }
 

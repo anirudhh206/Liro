@@ -27,9 +27,7 @@ export async function buildUnsignedTransactionHex(params: {
   instructions: Instruction[];
   feePayer: Address;
 }): Promise<string> {
-  const { value: latestBlockhash } = await rpc
-    .getLatestBlockhash({ commitment: "confirmed" })
-    .send();
+  const { value: latestBlockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -44,9 +42,7 @@ export async function buildUnsignedTransactionHex(params: {
 }
 
 /** Submits a fully-signed transaction (hex wire bytes, as returned by Turnkey) and returns its signature. */
-export async function submitSignedTransactionHex(
-  signedTransactionHex: string,
-): Promise<string> {
+export async function submitSignedTransactionHex(signedTransactionHex: string): Promise<string> {
   const wireBytes = Buffer.from(signedTransactionHex, "hex");
   // No runtime validator for this brand ships in @solana/kit for a bare
   // string (only for a Kit-native Transaction object) — this cast is a
