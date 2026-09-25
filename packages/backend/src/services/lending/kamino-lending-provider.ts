@@ -1,13 +1,24 @@
-import { createSolanaRpc, address, type Address } from "@solana/kit";
+import { Decimal } from "decimal.js";
+import { address, createNoopSigner, type Address } from "@solana/kit";
 import {
+  KaminoAction,
   KaminoMarket,
+  VanillaObligation,
   DEFAULT_RECENT_SLOT_DURATION_MS,
   ReserveStatus,
+  getCurrentLedgerInstant,
 } from "@kamino-finance/klend-sdk";
-import type { AssetSymbol, LendingProvider, ReserveHealth } from "@liro/shared";
+import {
+  BORROW_ASSET_SYMBOL,
+  type AssetSymbol,
+  type LendingProvider,
+  type ReserveHealth,
+} from "@liro/shared";
 import { env } from "../../config/env.js";
-
-const rpc = createSolanaRpc(env.SOLANA_RPC_URL);
+import { prisma } from "../../db/client.js";
+import { rpc, buildUnsignedTransactionHex } from "../wallet/solana-tx.util.js";
+import { turnkeyWalletProvider } from "../wallet/turnkey-wallet-provider.js";
+import { getSanityCheckedPrice } from "../pricing/pricing.service.js";
 
 /**
  * Kamino's main lending market address (mainnet-beta), per Kamino's own
@@ -46,15 +57,15 @@ async function loadMarket(): Promise<KaminoMarket> {
   return cachedMarket;
 }
 
-function getReserveForAsset(market: KaminoMarket, asset: AssetSymbol) {
-  // ADR-4's basket symbols (AAPLx/NVDAx/SPYx) are expected to match Kamino's
-  // own reserve token symbols for the xStocks collateral market. If Kamino
-  // lists them under a different symbol string, this lookup needs updating
-  // to key off mint address instead — verify against market.getReserves()
-  // once the xStocks reserve set is confirmed live.
-  const [reserve] = market.getReservesBySymbol(asset);
+function getReserveBySymbol(market: KaminoMarket, symbol: string) {
+  // ADR-4's basket symbols (AAPLx/NVDAx/SPYx) and BORROW_ASSET_SYMBOL (USDC)
+  // are expected to match Kamino's own reserve token symbols on the xStocks
+  // collateral market. If Kamino lists any of them under a different symbol
+  // string, this lookup needs updating to key off mint address instead —
+  // verify against market.getReserves() once the reserve set is confirmed live.
+  const [reserve] = market.getReservesBySymbol(symbol);
   if (!reserve) {
-    throw new Error(`No Kamino reserve found for asset ${asset}`);
+    throw new Error(`No Kamino reserve found for symbol ${symbol}`);
   }
   return reserve;
 }
@@ -64,8 +75,26 @@ export async function getKaminoOraclePrice(
   asset: AssetSymbol,
 ): Promise<number> {
   const market = await loadMarket();
-  const reserve = getReserveForAsset(market, asset);
+  const reserve = getReserveBySymbol(market, asset);
   return reserve.getOracleMarketPrice().toNumber();
+}
+
+/** Converts a USD amount into a reserve's base-unit token amount using decimal.js — never floats — for financial-grade precision. */
+function usdToBaseUnits(
+  amountUsd: string,
+  priceUsd: number,
+  decimals: number,
+): string {
+  return new Decimal(amountUsd)
+    .dividedBy(priceUsd)
+    .mul(new Decimal(10).pow(decimals))
+    .toFixed(0);
+}
+
+async function loadUserSigner(userId: string) {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  const ownerAddress = address(user.walletAddress);
+  return { ownerAddress, owner: createNoopSigner(ownerAddress) };
 }
 
 /**
@@ -76,7 +105,7 @@ export async function getKaminoOraclePrice(
 export const kaminoLendingProvider: LendingProvider = {
   async getReserveHealth(asset: AssetSymbol): Promise<ReserveHealth> {
     const market = await loadMarket();
-    const reserve = getReserveForAsset(market, asset);
+    const reserve = getReserveBySymbol(market, asset);
 
     const status: ReserveHealth["status"] =
       reserve.stats.status === ReserveStatus.Active
@@ -92,27 +121,101 @@ export const kaminoLendingProvider: LendingProvider = {
     };
   },
 
-  async deposit(params): Promise<{ txSignature: string }> {
-    // Real flow: load the reserve via getReserveForAsset, then build the
-    // deposit instructions through KaminoAction's v12 builder (which now
-    // takes a @solana/kit TransactionSigner, not a web3.js PublicKey, for
-    // the owner — matching the ecosystem-wide Solana Kit migration this SDK
-    // major went through). The signer itself is Turnkey's policy-scoped
-    // signer (ADR-1), not a locally-held key — see
-    // wallet/turnkey-wallet-provider.ts. Exact KaminoAction method name/
-    // shape for v12 needs confirming against the current SDK docs before
-    // first real run; deliberately left unimplemented rather than guessed.
-    throw new Error(
-      `deposit() not yet wired for userId=${params.userId}, asset=${params.asset}, amountUsd=${params.amountUsd}: ` +
-        "build via KaminoAction's v12 deposit txn builder, then sign through TurnkeyWalletProvider.signAllowlistedAction",
+  async deposit(params: {
+    userId: string;
+    asset: AssetSymbol;
+    amountUsd: string;
+  }): Promise<{ txSignature: string }> {
+    const market = await loadMarket();
+    const reserve = getReserveBySymbol(market, params.asset);
+    const { ownerAddress, owner } = await loadUserSigner(params.userId);
+
+    // ADR-8's cross-checked price, not Kamino's own reading alone — a
+    // deposit amount computed off a single unchecked oracle is exactly the
+    // failure mode ADR-8 exists to prevent.
+    const { priceUsd } = await getSanityCheckedPrice(params.asset);
+    const amount = usdToBaseUnits(
+      params.amountUsd,
+      priceUsd,
+      reserve.stats.decimals,
     );
+
+    const currentLedgerInstant = await getCurrentLedgerInstant(
+      rpc as unknown as Parameters<typeof getCurrentLedgerInstant>[0],
+    );
+
+    const kaminoAction = await KaminoAction.buildDepositTxns({
+      kaminoMarket: market,
+      amount,
+      reserveAddress: reserve.address,
+      owner,
+      obligation: new VanillaObligation(market.programId),
+      useV2Ixs: true,
+      scopeRefreshConfig: undefined,
+      currentLedgerInstant,
+    });
+
+    const unsignedTransactionHex = await buildUnsignedTransactionHex({
+      instructions: [
+        ...kaminoAction.setupIxs,
+        ...kaminoAction.lendingIxs,
+        ...kaminoAction.cleanupIxs,
+      ],
+      feePayer: ownerAddress,
+    });
+
+    const signed = await turnkeyWalletProvider.signAndSubmitTransaction({
+      userId: params.userId,
+      action: "deposit_kamino_collateral",
+      unsignedTransactionHex,
+    });
+
+    return { txSignature: signed.txSignature };
   },
 
-  async borrow(params): Promise<{ txSignature: string; borrowedUsd: string }> {
-    // Symmetric to deposit() above — same not-yet-wired reasoning.
-    throw new Error(
-      `borrow() not yet wired for userId=${params.userId}, amountUsd=${params.amountUsd}: ` +
-        `build via KaminoAction's v12 borrow txn builder, then sign through TurnkeyWalletProvider.signAllowlistedAction("borrow_against_collateral", ...)`,
+  async borrow(params: {
+    userId: string;
+    amountUsd: string;
+  }): Promise<{ txSignature: string; borrowedUsd: string }> {
+    const market = await loadMarket();
+    const reserve = getReserveBySymbol(market, BORROW_ASSET_SYMBOL);
+    const { ownerAddress, owner } = await loadUserSigner(params.userId);
+
+    // USDC is a stable, 1:1 asset — no oracle cross-check needed to convert
+    // a USD borrow amount into USDC base units (unlike deposit(), which
+    // prices a volatile xStock).
+    const amount = usdToBaseUnits(params.amountUsd, 1, reserve.stats.decimals);
+
+    const currentLedgerInstant = await getCurrentLedgerInstant(
+      rpc as unknown as Parameters<typeof getCurrentLedgerInstant>[0],
     );
+
+    const kaminoAction = await KaminoAction.buildBorrowTxns({
+      kaminoMarket: market,
+      amount,
+      reserveAddress: reserve.address,
+      owner,
+      obligation: new VanillaObligation(market.programId),
+      useV2Ixs: true,
+      scopeRefreshConfig: undefined,
+      currentLedgerInstant,
+    });
+
+    const unsignedTransactionHex = await buildUnsignedTransactionHex({
+      instructions: [
+        ...kaminoAction.setupIxs,
+        ...kaminoAction.lendingIxs,
+        ...kaminoAction.cleanupIxs,
+      ],
+      feePayer: ownerAddress,
+    });
+
+    const signed = await turnkeyWalletProvider.signAndSubmitTransaction({
+      userId: params.userId,
+      action: "borrow_against_collateral",
+      unsignedTransactionHex,
+    });
+
+    return { txSignature: signed.txSignature, borrowedUsd: params.amountUsd };
   },
 };

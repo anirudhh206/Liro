@@ -55,3 +55,14 @@ export async function buildSwapTransaction(params: {
   }
   return (await res.json()) as { swapTransaction: string };
 }
+
+/**
+ * Jupiter returns `swapTransaction` as base64-encoded wire bytes (a
+ * web3.js-serialized VersionedTransaction). Turnkey's SIGN_TRANSACTION_V2
+ * activity expects hex (confirmed against @turnkey/solana's own
+ * serialization — see solana-tx.util.ts), so every swap transaction is
+ * re-encoded before it reaches TurnkeyWalletProvider.
+ */
+export function swapTransactionToHex(swapTransactionBase64: string): string {
+  return Buffer.from(swapTransactionBase64, "base64").toString("hex");
+}

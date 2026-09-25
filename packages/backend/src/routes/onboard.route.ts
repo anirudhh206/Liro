@@ -21,13 +21,20 @@ export default async function onboardRoutes(
     const body = onboardBodySchema.parse(request.body);
     const ipAddress = request.ip;
 
-    // 1. Create the user's policy-scoped embedded wallet (ADR-1).
+    // 1. Create the user's policy-scoped embedded wallet (ADR-1). Turnkey's
+    // sub-organization is keyed by its own generated name, independent of
+    // our userId, so this can run before the User row exists — the row is
+    // then created with both identifiers already in hand, never backfilled.
+    const provisionalUserId = crypto.randomUUID();
     const wallet = await turnkeyWalletProvider.createEmbeddedWallet({
-      userId: "pending",
+      userId: provisionalUserId,
     });
 
     const user = await prisma.user.create({
-      data: { walletAddress: wallet.walletAddress },
+      data: {
+        walletAddress: wallet.walletAddress,
+        turnkeySubOrgId: wallet.turnkeySubOrgId,
+      },
     });
 
     // 2. Record eligibility immutably (ADR-5) — this never blocks wallet

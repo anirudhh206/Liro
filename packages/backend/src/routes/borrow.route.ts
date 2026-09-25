@@ -5,7 +5,6 @@ import { appendLedgerEntry } from "../ledger/ledger.repository.js";
 import { storeIdempotentResponse } from "../plugins/idempotency.js";
 import { kaminoLendingProvider } from "../services/lending/kamino-lending-provider.js";
 import { getSanityCheckedPrice } from "../services/pricing/pricing.service.js";
-import { turnkeyWalletProvider } from "../services/wallet/turnkey-wallet-provider.js";
 
 const borrowBodySchema = z.object({
   amountUsd: z
@@ -47,18 +46,11 @@ export default async function borrowRoutes(
       // Fastify error handler in app.ts maps to a 503) if Pyth and Kamino disagree.
       await getSanityCheckedPrice(body.collateralAsset);
 
+      // borrow() builds and signs its own transaction internally (see
+      // kamino-lending-provider.ts) — no separate Turnkey call here.
       const borrowResult = await kaminoLendingProvider.borrow({
         userId: request.userId,
         amountUsd: body.amountUsd,
-      });
-
-      const signed = await turnkeyWalletProvider.signAllowlistedAction({
-        userId: request.userId,
-        action: "borrow_against_collateral",
-        payload: {
-          amountUsd: body.amountUsd,
-          collateralAsset: body.collateralAsset,
-        },
       });
 
       const ledgerRow = await appendLedgerEntry({
@@ -67,7 +59,7 @@ export default async function borrowRoutes(
         amountUsd: borrowResult.borrowedUsd,
         metadata: {
           collateralAsset: body.collateralAsset,
-          txSignature: signed.txSignature,
+          txSignature: borrowResult.txSignature,
         },
       });
 
