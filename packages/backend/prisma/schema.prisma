@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// ADR-6: append-only. Application code must never UPDATE or DELETE a row
+/// here — balances are always derived by summing entries for a user.
+model LedgerEntry {
+  id         BigInt   @id @default(autoincrement())
+  userId     String   @map("user_id") @db.Uuid
+  entryType  String   @map("entry_type") // 'deposit' | 'invest' | 'borrow' | 'payout'
+  amountUsd  Decimal  @map("amount_usd") @db.Decimal(18, 2)
+  metadata   Json
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("ledger_entries")
+}
+
+/// ADR-6: dedupes retried mutating requests on (user_id, idempotency_key).
+model IdempotencyKey {
+  userId          String   @map("user_id") @db.Uuid
+  idempotencyKey  String   @map("idempotency_key")
+  responseBody    Json     @map("response_body")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@id([userId, idempotencyKey])
+  @@map("idempotency_keys")
+}
+
+/// ADR-5: one immutable row per onboarding eligibility decision — never a
+/// boolean that vanishes after the check.
+model EligibilityRecord {
+  id                  BigInt   @id @default(autoincrement())
+  userId              String   @map("user_id") @db.Uuid
+  declaredCountry     String   @map("declared_country")
+  ipGeolocatedCountry String?  @map("ip_geolocated_country")
+  decision            String // 'approved' | 'rejected'
+  reason              String
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("eligibility_records")
+}
+
+/// ADR-7: identity anchor. userId in every request is derived from a
+/// verified session token that references this row — never trusted from
+/// client-supplied data.
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  walletAddress   String   @unique @map("wallet_address")
+  turnkeySubOrgId String?  @map("turnkey_sub_org_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ledgerEntries      LedgerEntry[]
+  idempotencyKeys    IdempotencyKey[]
+  eligibilityRecords EligibilityRecord[]
+
+  @@map("users")
+}
