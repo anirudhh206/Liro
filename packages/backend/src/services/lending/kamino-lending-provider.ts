@@ -1,19 +1,19 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { createSolanaRpc, address, type Address } from "@solana/kit";
 import {
-  KaminoAction,
   KaminoMarket,
-  VanillaObligation,
+  DEFAULT_RECENT_SLOT_DURATION_MS,
+  ReserveStatus,
 } from "@kamino-finance/klend-sdk";
 import type { AssetSymbol, LendingProvider, ReserveHealth } from "@liro/shared";
 import { env } from "../../config/env.js";
 
-const connection = new Connection(env.SOLANA_RPC_URL, "confirmed");
+const rpc = createSolanaRpc(env.SOLANA_RPC_URL);
 
 /**
  * Kamino's main lending market address (mainnet-beta), per Kamino's own
  * deployed-addresses docs. Not a secret — public program state.
  */
-const KAMINO_MAIN_MARKET = new PublicKey(
+const KAMINO_MAIN_MARKET: Address = address(
   "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
 );
 
@@ -21,7 +21,21 @@ let cachedMarket: KaminoMarket | null = null;
 
 async function loadMarket(): Promise<KaminoMarket> {
   if (!cachedMarket) {
-    const market = await KaminoMarket.load(connection, KAMINO_MAIN_MARKET);
+    // klend-sdk v12 is built on @solana/kit (Rpc<...>/Address), not web3.js's
+    // Connection/PublicKey — confirmed against the installed package's own
+    // type declarations (dist/classes/market.d.ts) rather than assumed.
+    // klend-sdk bundles its own @solana/kit@2.3.0 internally while its own
+    // sub-dependencies (@solana-program/*) require @solana/kit@^3.0 — a real
+    // version-skew bug in Kamino's own dependency tree (visible as a pnpm
+    // peer-dependency warning on install), which makes the Rpc client from
+    // our top-level @solana/kit@3.x structurally incompatible with what
+    // klend-sdk's types declare. The cast below bridges that mismatch; it
+    // does not paper over anything on our side.
+    const market = await KaminoMarket.load(
+      rpc as unknown as Parameters<typeof KaminoMarket.load>[0],
+      KAMINO_MAIN_MARKET,
+      DEFAULT_RECENT_SLOT_DURATION_MS,
+    );
     if (!market) {
       throw new Error(
         "Kamino market failed to load — check SOLANA_RPC_URL and market address",
@@ -36,9 +50,9 @@ function getReserveForAsset(market: KaminoMarket, asset: AssetSymbol) {
   // ADR-4's basket symbols (AAPLx/NVDAx/SPYx) are expected to match Kamino's
   // own reserve token symbols for the xStocks collateral market. If Kamino
   // lists them under a different symbol string, this lookup needs updating
-  // to key off mint address instead — verify against
-  // market.getReserves() once the xStocks reserve set is confirmed live.
-  const reserve = market.getReserve(asset);
+  // to key off mint address instead — verify against market.getReserves()
+  // once the xStocks reserve set is confirmed live.
+  const [reserve] = market.getReservesBySymbol(asset);
   if (!reserve) {
     throw new Error(`No Kamino reserve found for asset ${asset}`);
   }
@@ -51,11 +65,7 @@ export async function getKaminoOraclePrice(
 ): Promise<number> {
   const market = await loadMarket();
   const reserve = getReserveForAsset(market, asset);
-  // reserve.stats exposes the SDK's own decimal-adjusted oracle price.
-  // Field name to reconfirm against the installed klend-sdk version's types
-  // (ReserveStats) before first real run — this is the SDK's documented
-  // "current price" accessor as of the README, not a guess at a raw account field.
-  return Number(reserve.stats.currentPrice ?? reserve.getOracleMarketPrice());
+  return reserve.getOracleMarketPrice().toNumber();
 }
 
 /**
@@ -68,58 +78,41 @@ export const kaminoLendingProvider: LendingProvider = {
     const market = await loadMarket();
     const reserve = getReserveForAsset(market, asset);
 
-    // Kamino reserves carry an on-chain status (Active / Obsolete / Hidden).
-    // Verify this exact accessor against the installed SDK version — it's
-    // read from reserve.state.status in the on-chain layout as of the
-    // current klend-sdk, not fabricated, but SDK versions shift field paths.
-    const rawStatus = reserve.state.status;
     const status: ReserveHealth["status"] =
-      rawStatus === 0 ? "active" : rawStatus === 1 ? "degraded" : "paused";
+      reserve.stats.status === ReserveStatus.Active
+        ? "active"
+        : reserve.stats.status === ReserveStatus.Obsolete
+          ? "degraded"
+          : "paused";
 
     return {
       status,
-      liquidityAvailableUsd: reserve.stats.totalDepositsWads
-        ? reserve.stats.totalDepositsWads.toString()
-        : "0",
+      liquidityAvailableUsd: reserve.getLiquidityAvailableAmount().toString(),
       checkedAt: new Date().toISOString(),
     };
   },
 
   async deposit(params): Promise<{ txSignature: string }> {
-    const market = await loadMarket();
-    const reserve = getReserveForAsset(market, params.asset);
-    const owner = new PublicKey(params.userId); // userId is the user's wallet pubkey (ADR-1)
-    const currentSlot = await connection.getSlot();
-
-    const kaminoAction = await KaminoAction.buildDepositTxns({
-      kaminoMarket: market,
-      amount: params.amountUsd,
-      reserveAddress: reserve.address,
-      owner,
-      obligation: new VanillaObligation(market.programId),
-      useV2Ixs: true,
-      scopeRefreshConfig: undefined,
-      currentSlot,
-    });
-
-    // Actual signing happens via the Turnkey policy-scoped signer (ADR-1),
-    // not a locally-held key — see wallet/turnkey-wallet-provider.ts, which
-    // calls this builder's output through signAllowlistedAction.
+    // Real flow: load the reserve via getReserveForAsset, then build the
+    // deposit instructions through KaminoAction's v12 builder (which now
+    // takes a @solana/kit TransactionSigner, not a web3.js PublicKey, for
+    // the owner — matching the ecosystem-wide Solana Kit migration this SDK
+    // major went through). The signer itself is Turnkey's policy-scoped
+    // signer (ADR-1), not a locally-held key — see
+    // wallet/turnkey-wallet-provider.ts. Exact KaminoAction method name/
+    // shape for v12 needs confirming against the current SDK docs before
+    // first real run; deliberately left unimplemented rather than guessed.
     throw new Error(
-      "kaminoAction built (" +
-        kaminoAction.setupIxs.length +
-        " setup ixs) — wire through TurnkeyWalletProvider.signAllowlistedAction to sign & submit before returning a real txSignature",
+      `deposit() not yet wired for userId=${params.userId}, asset=${params.asset}, amountUsd=${params.amountUsd}: ` +
+        "build via KaminoAction's v12 deposit txn builder, then sign through TurnkeyWalletProvider.signAllowlistedAction",
     );
   },
 
   async borrow(params): Promise<{ txSignature: string; borrowedUsd: string }> {
-    // Symmetric to buildDepositTxns; klend-sdk exposes a borrow builder on
-    // KaminoAction (naming to confirm against the installed version — the
-    // README excerpt available at scaffold time only documented deposit).
-    // Same signing path as deposit: build here, sign via Turnkey policy.
+    // Symmetric to deposit() above — same not-yet-wired reasoning.
     throw new Error(
-      `borrow() not yet wired: build via KaminoAction's borrow txn builder for ${params.amountUsd} USD, ` +
-        `then sign through TurnkeyWalletProvider.signAllowlistedAction("borrow_against_collateral", ...)`,
+      `borrow() not yet wired for userId=${params.userId}, amountUsd=${params.amountUsd}: ` +
+        `build via KaminoAction's v12 borrow txn builder, then sign through TurnkeyWalletProvider.signAllowlistedAction("borrow_against_collateral", ...)`,
     );
   },
 };

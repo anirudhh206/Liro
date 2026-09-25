@@ -33,9 +33,7 @@ export default async function borrowRoutes(
       const body = borrowBodySchema.parse(request.body);
 
       const health = await kaminoLendingProvider.getReserveHealth(
-        body.collateralAsset as Parameters<
-          typeof kaminoLendingProvider.getReserveHealth
-        >[0],
+        body.collateralAsset,
       );
       if (health.status !== "active") {
         return reply.code(503).send({
@@ -44,10 +42,10 @@ export default async function borrowRoutes(
         });
       }
 
-      // ADR-8's cross-check runs inside pricing.service and is consulted by
-      // the borrow-limit calculation upstream of this call in a full
-      // implementation; wired here as the explicit gate kaminoLendingProvider.borrow
-      // itself does not perform.
+      // ADR-8: hard gate, not a warning — refuses to price the borrow off a
+      // single unchecked oracle read. Throws OracleDivergenceError (which the
+      // Fastify error handler in app.ts maps to a 503) if Pyth and Kamino disagree.
+      await getSanityCheckedPrice(body.collateralAsset);
 
       const borrowResult = await kaminoLendingProvider.borrow({
         userId: request.userId,

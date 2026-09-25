@@ -12,22 +12,25 @@
     "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
+    "@fastify/sensible": "^6.0.5",
+    "@kamino-finance/klend-sdk": "^12.0.0",
+    "@lightsparkdev/grid": "^1.8.0",
     "@liro/shared": "workspace:*",
-    "@fastify/sensible": "^6.0.2",
-    "@kamino-finance/klend-sdk": "^7.3.15",
-    "@lightsparkdev/grid": "^0.1.0",
-    "@prisma/client": "^5.20.0",
-    "@pythnetwork/hermes-client": "^2.1.0",
-    "@solana/web3.js": "^1.95.3",
-    "@turnkey/sdk-server": "^2.5.0",
-    "fastify": "^5.1.0",
-    "jose": "^5.9.6",
-    "pino": "^9.5.0",
-    "zod": "^3.23.8"
+    "@prisma/client": "^6.19.3",
+    "@pythnetwork/hermes-client": "^3.1.0",
+    "@solana/kit": "^3.0.3",
+    "@solana/web3.js": "^1.99.0",
+    "@turnkey/sdk-server": "^8.6.0",
+    "dotenv": "^18.0.3",
+    "fastify": "^5.12.5",
+    "fastify-plugin": "^6.0.0",
+    "jose": "^6.2.12",
+    "pino": "^10.3.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
-    "prisma": "^5.20.0",
+    "prisma": "^6.19.3",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

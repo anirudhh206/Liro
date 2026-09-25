@@ -8,5 +8,6 @@ build/
 prisma/generated/
 .turbo/
 coverage/
+*.tsbuildinfo
 
 /.claude

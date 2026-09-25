@@ -1,4 +1,5 @@
 import type { LedgerEntryType } from "@liro/shared";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db/client.js";
 
 /**
@@ -17,7 +18,7 @@ export async function appendLedgerEntry(params: {
       userId: params.userId,
       entryType: params.entryType,
       amountUsd: params.amountUsd,
-      metadata: params.metadata,
+      metadata: params.metadata as Prisma.InputJsonValue,
     },
   });
   return { id: row.id.toString() };
