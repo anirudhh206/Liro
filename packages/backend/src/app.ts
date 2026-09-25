@@ -8,10 +8,12 @@ import idempotencyPlugin from "./plugins/idempotency.js";
 import { OracleDivergenceError } from "./services/pricing/pricing.service.js";
 import { WalletPolicyViolationError } from "./services/wallet/turnkey-wallet-provider.js";
 import { PayoutProviderNotConfiguredError } from "./services/payout/lightspark-grid-payout-provider.js";
+import { KycProviderNotConfiguredError } from "./services/kyc/persona-kyc-provider.js";
 import onboardRoutes from "./routes/onboard.route.js";
 import investRoutes from "./routes/invest.route.js";
 import borrowRoutes from "./routes/borrow.route.js";
 import payoutRoutes from "./routes/payout.route.js";
+import kycRoutes from "./routes/kyc.route.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -28,6 +30,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(investRoutes);
   await app.register(borrowRoutes);
   await app.register(payoutRoutes);
+  await app.register(kycRoutes);
 
   app.get("/health", () => ({ status: "ok" }));
 
@@ -48,6 +51,9 @@ export async function buildApp(): Promise<FastifyInstance> {
         error: "payout_provider_not_configured",
         message: error.message,
       });
+    }
+    if (error instanceof KycProviderNotConfiguredError) {
+      return reply.code(503).send({ error: "kyc_provider_not_configured", message: error.message });
     }
 
     app.log.error(error);

@@ -53,6 +53,23 @@ model EligibilityRecord {
   @@map("eligibility_records")
 }
 
+/// ADR-5's next layer: one immutable row per KYC status observation (an
+/// inquiry creation, a poll, or a webhook update) — same reasoning as
+/// EligibilityRecord: a status that only lives as a mutable field on User
+/// vanishes its own history the moment it changes.
+model KycVerificationRecord {
+  id        BigInt   @id @default(autoincrement())
+  userId    String   @map("user_id") @db.Uuid
+  inquiryId String   @map("inquiry_id")
+  status    String // KycStatus: 'pending' | 'approved' | 'declined' | 'requires_input'
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("kyc_verification_records")
+}
+
 /// ADR-7: identity anchor. userId in every request is derived from a
 /// verified session token that references this row — never trusted from
 /// client-supplied data.
@@ -60,11 +77,16 @@ model User {
   id              String   @id @default(uuid()) @db.Uuid
   walletAddress   String   @unique @map("wallet_address")
   turnkeySubOrgId String?  @map("turnkey_sub_org_id")
+  /// Cached from the latest KycVerificationRecord — a fast-path read, never
+  /// the source of truth (that's the append-only table above).
+  kycInquiryId    String?  @map("kyc_inquiry_id")
+  kycStatus       String?  @map("kyc_status")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  ledgerEntries      LedgerEntry[]
-  idempotencyKeys    IdempotencyKey[]
-  eligibilityRecords EligibilityRecord[]
+  ledgerEntries          LedgerEntry[]
+  idempotencyKeys        IdempotencyKey[]
+  eligibilityRecords     EligibilityRecord[]
+  kycVerificationRecords KycVerificationRecord[]
 
   @@map("users")
 }

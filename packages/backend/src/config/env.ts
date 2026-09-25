@@ -28,6 +28,10 @@ const envSchema = z.object({
 
   IP_GEOLOCATION_API_URL: z.string().url().optional(),
   IP_GEOLOCATION_API_KEY: z.string().optional(),
+
+  PERSONA_API_KEY: z.string().optional(),
+  PERSONA_INQUIRY_TEMPLATE_ID: z.string().optional(),
+  PERSONA_API_BASE_URL: z.string().url().default("https://api.withpersona.com/api/v1"),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -45,3 +49,6 @@ export const env = loadEnv();
 
 /** True once real Grid sandbox credentials exist (ADR-3 named blocker). */
 export const gridCredentialsConfigured = Boolean(env.GRID_CLIENT_ID && env.GRID_CLIENT_SECRET);
+
+/** True once real Persona credentials exist (ADR-5's next-layer named blocker). */
+export const personaCredentialsConfigured = Boolean(env.PERSONA_API_KEY && env.PERSONA_INQUIRY_TEMPLATE_ID);
